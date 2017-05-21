@@ -1,0 +1,395 @@
+---
+title: "2016 r/changemyview Submissions and their Authors"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+```{r init, include = FALSE, verbose=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(verbose=FALSE, echo=FALSE, warning=FALSE, message=FALSE)
+library(flexdashboard)
+library(tidyverse)
+library(stringr)
+library(plotly)
+library(shiny)
+library(lubridate)
+library(feather)
+library(DT)
+library(ineq)
+library(anytime)
+
+theme_set(theme_minimal())
+
+dat_cmv_auth_subs <- read_feather("cmv_auth_subs_no_content.feather") %>%
+  mutate(date = anytime(created_utc))
+                           
+
+dat_cmv_subs <- read_feather("cmv_subs.feather") %>%
+  mutate(date = anytime(created_utc),  
+         tot_deltas = cumsum(OP_gave_delta))
+```
+
+Intro 
+==============================================================================
+
+2016 r/changemyview submissions
+==============================================================================
+
+Filter r/changemyview submissions {.sidebar}
+----------------------------------------------
+```{r filter_date}
+start_date <- mdy("1/1/16")
+end_date <- mdy("12/31/16")
+
+sliderInput(
+  "cmv_time_range",
+  label = "Select Time Span",
+  min = start_date,
+  max = end_date,
+  value = c(start_date, end_date),
+  ticks = FALSE,
+  timeFormat = "%m/%d"
+)
+
+sliderInput(
+  "cmv_bin_width",
+  label = "Select Bin Width (Days)",
+  min = 1,
+  max = 30,
+  value = 7
+)
+```
+
+<!-- ## Select Delta Status -->
+<!-- ```{r} -->
+<!-- delta_status = c("Delta Given", "No Delta Given", "Either") -->
+
+<!-- selectInput( -->
+<!--   "delta_status", -->
+<!--   "Delta Status", -->
+<!--   choices = delta_status -->
+<!-- ) -->
+<!-- ``` -->
+
+Row
+---------------------------------------------
+
+### Frequency of Opinion Malleability
+
+```{r}
+reac_dat_cmv_sub <- reactive({
+  dat_cmv_subs %>%
+    filter(date >= input$cmv_time_range[1] &
+             date <= input$cmv_time_range[2])
+})
+
+renderPlotly({
+  ggplotly(
+  ggplot(reac_dat_cmv_sub(), 
+         aes(date, color = OP_gave_delta)) +
+    geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
+    scale_color_manual(labels = c("Opinion not change", "Opinion Changed"),
+                       values = c("red", "green")) + 
+    labs(title = "",
+         subtitle = "",
+         x = "Date",
+         y = "Submissions",
+         color = "Opinion changed"
+         ),
+    tooltip = c("x", "y")
+  )
+})
+```
+
+
+Row 
+-------------------------------------
+
+### /r/changemyview submission titles
+
+```{r}
+reac_table_cmv_sub <- reactive({
+  reac_dat_cmv_sub() %>%
+    select(OP_gave_delta, title, date) %>%
+    mutate(date = paste(year(date), month(date), sep = "/"))
+})
+
+renderDataTable(
+  datatable(
+  reac_table_cmv_sub(),
+  options = list(DT.fillContainer = T), 
+  rownames = FALSE
+      )
+)
+```
+
+Search by Title {data-orientation=rows}
+==============================================================================
+
+Title {.sidebar}
+----------------------------------------------
+```{r read_model_dat}
+dat_model <- read_feather("dat_model.feather")
+indep_vars <- dat_model %>%
+  select(-OP_gave_delta)
+
+sumry_model_gave_delta <- dat_model %>% 
+  group_by(OP_gave_delta) %>%
+  summarise(count = n()) %>%
+  mutate(prop = count / sum(count))
+```
+
+### Title
+
+```{r}
+selectInput("cmv_title", "", sort(unique(dat_model$title)),
+                selected = "CMV: Trump supports the Jewish people")
+
+reac_cmv_sub <- reactive({
+ dat_cmv_subs %>%
+    filter(title == input$cmv_title)
+})
+```
+
+
+Row
+--------------------------------------------
+
+### Author
+```{r}
+renderValueBox({
+  valueBox(reac_cmv_sub()[["author"]],
+         caption = strftime(reac_cmv_sub()[["date"]],
+                                           format = "%m/%d   %H:%M %Z")
+  )
+})
+```
+
+### OP gave delta
+```{r}
+renderValueBox(
+  valueBox(
+    ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "Opinion Changed",
+           "No Opinion Change"),
+    caption = sprintf("%d user comments | %d direct replies", 
+                      reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]]), 
+    icon = "fa-id-card",
+    color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "green", "red"),
+    href = reac_cmv_sub()[["href"]]
+  )
+)
+```
+
+Row
+-------------------------------------------
+
+### 
+```{r}
+reac_auth_stats <- reactive({
+  dat_model %>%
+    filter(author == reac_cmv_sub()[["author"]], 
+           created_utc == reac_cmv_sub()[["created_utc"]])
+})
+
+renderValueBox(
+  valueBox(
+    sprintf("%d", reac_auth_stats()[["num_prior_subs"]]),
+    "Prior Submissions"
+  )
+)
+```
+
+### 
+```{r}
+renderValueBox(
+  valueBox(
+    sprintf("%.2f (%.1f)", reac_auth_stats()[["avg_sub_score"]],
+            reac_auth_stats()[["avg_sub_score"]] * reac_auth_stats()[["num_prior_subs"]]),
+    "Average (Total) Submissions Score"
+  )
+)
+```
+
+### Submission Diversity
+```{r}
+col_ramp <- colorRamp(c("red", "orange", "green"))
+gini_colors <- function(num){
+  colors <- col_ramp(num)
+  rgb(colors[1], colors[2], colors[3], maxColorValue = 255)
+}
+
+reac_gini_color <- reactive({
+  gini_colors(reac_auth_stats()[["gini_index"]])
+})
+
+renderValueBox(
+  valueBox(
+    sprintf("% .2f Gini Index", reac_auth_stats()[["gini_index"]]),
+    color = reac_gini_color()
+  )
+)
+```
+
+Row {.tabset}
+--------------------------------------------
+
+### /r/changemyview submission
+
+```{r, results="asis"}
+reac_cmv_sub_content <- reactive({
+  writeLines(reac_cmv_sub()[["content"]])
+})
+
+renderPrint(reac_cmv_sub_content())
+```
+
+### Prior Submissions
+```{r}
+reac_cmv_auth_past <- reactive({
+  dat_cmv_auth_subs %>%
+    filter(author == reac_cmv_sub()[["author"]]
+           ) %>%
+    select(-c(author, href, created_utc)) %>%
+    mutate(date_new = paste(month(date), day(date), year(date), sep = "/"))
+})
+
+renderDataTable(
+  datatable(
+  reac_cmv_auth_past() %>% select(-date_new),
+  options = list(DT.fillContainer = T),
+  rownames = FALSE
+      )
+)
+```
+
+Author Background {data-orientation=rows}
+==============================================================================
+
+Filter {.sidebar}
+----------------------------------------------
+```{r}
+selectizeInput("cmv_author", "", unique(dat_cmv_subs$author),
+                selected = "oldie101")
+
+radioButtons("timeline_type", "Timeline Type",
+               c("Score" = "score",
+                 "Submission Activity" = "sub_activity"),
+               selected = "score")
+
+sliderInput(
+  "past_bin_width",
+  label = "Select Bin Width (Days)",
+  min = 1,
+  max = 365,
+  value = 30
+)
+# selectizeInput("cmv_subreddit", "", unique(dat_cmv_auth_subs$subreddit))
+```
+
+```{r make_model_dat, eval=FALSE}
+model_indep_vars <- function(submission, dat_cmv_auth_subs){
+  force(dat_cmv_auth_subs)
+  prior_subs <- dat_cmv_auth_subs %>%
+    filter(author == submission$author,
+           created_utc < submission$created_utc)
+  
+  if (nrow(prior_subs) == 0){
+    has_priors <- FALSE
+  } else{
+    has_priors <- TRUE
+  }
+  
+  subreddit_dist <- prior_subs %>%
+    group_by(subreddit) %>%
+    summarise(n = n())
+  
+  # browser()
+  
+  (sub_info <- c(nrow(prior_subs),
+                mean(prior_subs$score),
+                ineq(subreddit_dist$n, type = "Gini"),
+                has_priors))
+}
+
+dat_model <- dat_cmv_subs %>%
+  by_row(model_indep_vars, dat_cmv_auth_subs = dat_cmv_auth_subs, 
+         .collate = "cols", .to = "indep_var") %>%
+  rename(num_prior_subs = indep_var1,
+         avg_sub_score = indep_var2,
+         gini_index = indep_var3,
+         has_priors = indep_var4) %>%
+  filter(has_priors == TRUE)
+
+write_feather(dat_model, "dat_model.feather")
+```
+
+
+Row
+-----------------------------------------------
+
+###
+
+```{r}
+reac_cmv_auth_past_activity <- reactive({
+  dat_cmv_auth_subs %>%
+    filter(author == input$cmv_author
+           ) %>%
+    mutate(new_date = paste(year(date), month(date), sep = "/")) %>%
+    select(-c(author, href, created_utc))
+})
+
+reac_cmv_auth_cmvs <- reactive({
+  cmv_only <- reac_cmv_auth_past_activity() %>%
+    filter(subreddit == "r/changemyview") %>%
+    select(date)
+  as.vector(cmv_only$date)
+})
+
+renderPlotly({
+  if (input$timeline_type == "score"){
+    plot <- ggplot(reac_cmv_auth_past_activity(), 
+                   aes(date, score)) +
+      geom_line() + 
+      labs(title = sprintf("Submission Score Timeline for %s", input$cmv_author),
+           subtitle = "Dashed Red line(s) indicate CMV Submission(s)",
+           y = "Score", 
+           x = "Date"
+           )
+  } else {
+    plot <- ggplot(reac_cmv_auth_past_activity(), 
+                   aes(date)) +
+      geom_freqpoly(binwidth = 86400 * input$past_bin_width, pad = FALSE) + 
+      labs(title = sprintf("Submission Activity for %s", input$cmv_author),
+           subtitle = sprintf("Every %d days\nDashed Red line(s) indicate CMV Submission(s)", input$cmv_past_bin_width * 86400),
+           x = "Date",
+           y = "Submissions",
+           color = "Opinion changed"
+           )
+  }
+  for (cmv_sub in reac_cmv_auth_cmvs()){
+    plot <- plot + geom_vline(xintercept = cmv_sub, linetype = "dashed", color = "red")
+    break()
+  }
+  plot
+})
+```
+
+Row
+------------------------------------------------------
+
+###  Browse past submissions
+```{r browse_past_subs}
+reac_table_past <- reactive({
+  reac_cmv_auth_past_activity() %>%
+    select(title, score, subreddit, date) %>%
+    mutate(date = paste(year(date), month(date), sep = "/"))
+})
+
+renderDataTable(
+  datatable(
+  reac_cmv_auth_past_activity() %>% select(-date),
+  options = list(DT.fillContainer = T),
+  rownames = FALSE
+      )
+)
+```
