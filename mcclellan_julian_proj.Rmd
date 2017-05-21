@@ -32,7 +32,18 @@ dat_cmv_subs <- read_feather("cmv_subs.feather") %>%
 Intro 
 ==============================================================================
 
-2016 r/changemyview submissions
+r/changemyview is a subreddit where redditors post their opinions as submissions, and
+other redditors respond in an attempt to change their opinion. If the original poster
+changes their opinion, then can award the comment that changed their opinion with a 
+"delta" that is added to the comment author's lifetime "deltas" received in the subreddit.
+
+All of the submissions (opinions) posted in 2016 have been gathered, as well as the
+entire submission history of the authors who posted their submissions. Ahead you can
+observe the frequency of opinions where the OP gave at least one delta, or no delta,
+the individual submissions with statistics from the author's history presented, as well
+as trends of individual authors' submission scores and submission frequency.
+
+r/changemyview Submissions Delta Trend
 ==============================================================================
 
 Filter r/changemyview submissions {.sidebar}
@@ -80,7 +91,10 @@ Row
 reac_dat_cmv_sub <- reactive({
   dat_cmv_subs %>%
     filter(date >= input$cmv_time_range[1] &
-             date <= input$cmv_time_range[2])
+             date <= input$cmv_time_range[2]) %>%
+    mutate(OP_gave_delta = ifelse(OP_gave_delta == TRUE,
+                                  "Opinion Changed",
+                                  "Opinion Stable"))
 })
 
 renderPlotly({
@@ -96,7 +110,7 @@ renderPlotly({
          y = "Submissions",
          color = "Opinion changed"
          ),
-    tooltip = c("x", "y")
+    tooltip = c("x", "y", "color")
   )
 })
 ```
@@ -105,7 +119,7 @@ renderPlotly({
 Row 
 -------------------------------------
 
-### /r/changemyview submission titles
+### CMV Submissions
 
 ```{r}
 reac_table_cmv_sub <- reactive({
@@ -123,7 +137,7 @@ renderDataTable(
 )
 ```
 
-Search by Title {data-orientation=rows}
+Search CMV Submissions by Title {data-orientation=rows}
 ==============================================================================
 
 Title {.sidebar}
@@ -159,8 +173,9 @@ Row
 ```{r}
 renderValueBox({
   valueBox(reac_cmv_sub()[["author"]],
-         caption = strftime(reac_cmv_sub()[["date"]],
-                                           format = "%m/%d   %H:%M %Z")
+         caption = " (Profile Link)",
+         href = sprintf("https://reddit.com/u/%s/submitted", reac_cmv_sub()[["author"]]),
+         color = "#0645AD"
   )
 })
 ```
@@ -171,7 +186,8 @@ renderValueBox(
   valueBox(
     ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "Opinion Changed",
            "No Opinion Change"),
-    caption = sprintf("%d user comments | %d direct replies", 
+    caption = sprintf("Posted: %s | %d user comments | %d direct replies (Submission Link)", 
+                      strftime(reac_cmv_sub()[["date"]], format = "%m/%d   %H:%M %Z"),
                       reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]]), 
     icon = "fa-id-card",
     color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "green", "red"),
@@ -203,7 +219,7 @@ renderValueBox(
 ```{r}
 renderValueBox(
   valueBox(
-    sprintf("%.2f (%.1f)", reac_auth_stats()[["avg_sub_score"]],
+    sprintf("%.2f (%.0f)", reac_auth_stats()[["avg_sub_score"]],
             reac_auth_stats()[["avg_sub_score"]] * reac_auth_stats()[["num_prior_subs"]]),
     "Average (Total) Submissions Score"
   )
@@ -255,14 +271,14 @@ reac_cmv_auth_past <- reactive({
 
 renderDataTable(
   datatable(
-  reac_cmv_auth_past() %>% select(-date_new),
+  reac_cmv_auth_past() %>% select(-date),
   options = list(DT.fillContainer = T),
   rownames = FALSE
       )
 )
 ```
 
-Author Background {data-orientation=rows}
+CMV Author Background {data-orientation=rows}
 ==============================================================================
 
 Filter {.sidebar}
@@ -284,7 +300,11 @@ sliderInput(
   value = 30
 )
 # selectizeInput("cmv_subreddit", "", unique(dat_cmv_auth_subs$subreddit))
+
+
 ```
+
+
 
 ```{r make_model_dat, eval=FALSE}
 model_indep_vars <- function(submission, dat_cmv_auth_subs){
@@ -323,6 +343,31 @@ dat_model <- dat_cmv_subs %>%
 write_feather(dat_model, "dat_model.feather")
 ```
 
+Column
+------------------------------------------------------
+
+### Author
+
+```{r}
+renderValueBox({
+  valueBox(input$cmv_author,
+         caption = "Profile Link",
+         href = sprintf("https://reddit.com/u/%s/submitted", input$cmv_author),
+         color = "#0645AD"
+  )
+})
+```
+
+### CMV Submissions
+
+```{r}
+renderValueBox({
+  valueBox(length(reac_cmv_auth_cmvs()),
+         caption = "Changemyview Submissions",
+         color = "#00cc99"
+  )
+})
+```
 
 Row
 -----------------------------------------------
@@ -350,8 +395,7 @@ renderPlotly({
     plot <- ggplot(reac_cmv_auth_past_activity(), 
                    aes(date, score)) +
       geom_line() + 
-      labs(title = sprintf("Submission Score Timeline for %s", input$cmv_author),
-           subtitle = "Dashed Red line(s) indicate CMV Submission(s)",
+      labs(subtitle = "Dashed Red line(s) indicate CMV Submission(s)",
            y = "Score", 
            x = "Date"
            )
@@ -359,30 +403,30 @@ renderPlotly({
     plot <- ggplot(reac_cmv_auth_past_activity(), 
                    aes(date)) +
       geom_freqpoly(binwidth = 86400 * input$past_bin_width, pad = FALSE) + 
-      labs(title = sprintf("Submission Activity for %s", input$cmv_author),
-           subtitle = sprintf("Every %d days\nDashed Red line(s) indicate CMV Submission(s)", input$cmv_past_bin_width * 86400),
+      labs(subtitle = sprintf("Every %d days\nDashed Red line(s) indicate CMV Submission(s)", input$cmv_past_bin_width * 86400),
            x = "Date",
            y = "Submissions",
            color = "Opinion changed"
            )
   }
   for (cmv_sub in reac_cmv_auth_cmvs()){
-    plot <- plot + geom_vline(xintercept = cmv_sub, linetype = "dashed", color = "red")
-    break()
+    plot <- plot + geom_vline(aes(text = "CMV post"),
+                              xintercept = cmv_sub, linetype = "dashed", color = "#00cc99", size = .3)
   }
   plot
 })
 ```
 
+
 Row
 ------------------------------------------------------
 
-###  Browse past submissions
+###  Past Submissions
 ```{r browse_past_subs}
 reac_table_past <- reactive({
   reac_cmv_auth_past_activity() %>%
     select(title, score, subreddit, date) %>%
-    mutate(date = paste(year(date), month(date), sep = "/"))
+    mutate(date = paste(month(date), day(date), year(date), sep = "/"))
 })
 
 renderDataTable(
