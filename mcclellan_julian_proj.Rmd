@@ -2,7 +2,7 @@
 title: "2016 r/changemyview Submissions and their Authors"
 output:
   flexdashboard::flex_dashboard:
-    orientation: rows
+    vertical_layout: scroll
 runtime: shiny
 ---
 ```{r init, include = FALSE, verbose=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
@@ -43,11 +43,11 @@ observe the frequency of opinions where the OP gave at least one delta, or no de
 the individual submissions with statistics from the author's history presented, as well
 as trends of individual authors' submission scores and submission frequency.
 
-r/changemyview Submissions Delta Trend
+r/changemyview Submissions Delta Trend {data-orientation=rows}
 ==============================================================================
 
 Filter r/changemyview submissions {.sidebar}
-----------------------------------------------
+-------------------------------------------------------------------------------
 ```{r filter_date}
 start_date <- mdy("1/1/16")
 end_date <- mdy("12/31/16")
@@ -83,10 +83,9 @@ sliderInput(
 <!-- ``` -->
 
 Row
----------------------------------------------
+-------------------------------------------------------------------------------
 
 ### Frequency of Opinion Malleability
-
 ```{r}
 reac_dat_cmv_sub <- reactive({
   dat_cmv_subs %>%
@@ -102,13 +101,13 @@ renderPlotly({
   ggplot(reac_dat_cmv_sub(), 
          aes(date, color = OP_gave_delta)) +
     geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
-    scale_color_manual(labels = c("Opinion not change", "Opinion Changed"),
-                       values = c("red", "green")) + 
+    scale_color_manual(labels = c("No Change", "Change"),
+                       values = c("green", "red")) + 
     labs(title = "",
          subtitle = "",
          x = "Date",
          y = "Submissions",
-         color = "Opinion changed"
+         color = "Opinion changed?"
          ),
     tooltip = c("x", "y", "color")
   )
@@ -117,10 +116,9 @@ renderPlotly({
 
 
 Row 
--------------------------------------
+-------------------------------------------------------------------------------
 
 ### CMV Submissions
-
 ```{r}
 reac_table_cmv_sub <- reactive({
   reac_dat_cmv_sub() %>%
@@ -131,7 +129,10 @@ reac_table_cmv_sub <- reactive({
 renderDataTable(
   datatable(
   reac_table_cmv_sub(),
-  options = list(DT.fillContainer = T), 
+  options = list(DT.fillContainer = T,
+                 autowidth = T, scrollY = 300,
+                 autoheight = T,
+                 pageLength = 30), 
   rownames = FALSE
       )
 )
@@ -163,6 +164,10 @@ reac_cmv_sub <- reactive({
  dat_cmv_subs %>%
     filter(title == input$cmv_title)
 })
+
+reac_cmv_sub_link <- reactive({
+  reac_cmv_sub[["href"]]
+})
 ```
 
 
@@ -171,10 +176,15 @@ Row
 
 ### Author
 ```{r}
+reac_cmv_auth_link <- reactive({
+  sprintf("https://reddit.com/u/%s/submitted", reac_cmv_sub()[["author"]])
+})
+
+
 renderValueBox({
   valueBox(reac_cmv_sub()[["author"]],
-         caption = " (Profile Link)",
-         href = sprintf("https://reddit.com/u/%s/submitted", reac_cmv_sub()[["author"]]),
+         caption = " (Author Profile Link)",
+         href = reac_cmv_auth_link(),
          color = "#0645AD"
   )
 })
@@ -182,16 +192,20 @@ renderValueBox({
 
 ### OP gave delta
 ```{r}
+reac_cmv_sub_link <- reactive({
+  reac_cmv_sub()[["href"]]
+})
+
 renderValueBox(
   valueBox(
     ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "Opinion Changed",
            "No Opinion Change"),
-    caption = sprintf("Posted: %s | %d user comments | %d direct replies (Submission Link)", 
+    caption = sprintf("Posted: %s | %d user comments | %d direct replies\n (Submission Link)", 
                       strftime(reac_cmv_sub()[["date"]], format = "%m/%d   %H:%M %Z"),
                       reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]]), 
     icon = "fa-id-card",
     color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "green", "red"),
-    href = reac_cmv_sub()[["href"]]
+    href = reac_cmv_sub_link()
   )
 )
 ```
@@ -206,6 +220,7 @@ reac_auth_stats <- reactive({
     filter(author == reac_cmv_sub()[["author"]], 
            created_utc == reac_cmv_sub()[["created_utc"]])
 })
+
 
 renderValueBox(
   valueBox(
@@ -249,7 +264,7 @@ renderValueBox(
 Row {.tabset}
 --------------------------------------------
 
-### /r/changemyview submission
+### Submission Content
 
 ```{r, results="asis"}
 reac_cmv_sub_content <- reactive({
@@ -272,13 +287,16 @@ reac_cmv_auth_past <- reactive({
 renderDataTable(
   datatable(
   reac_cmv_auth_past() %>% select(-date),
-  options = list(DT.fillContainer = T),
+  options = list(DT.fillContainer = T,
+                 autowidth = T, scrollY = 300,
+                 autoheight = T,
+                 pageLength = 30), 
   rownames = FALSE
       )
 )
 ```
 
-CMV Author Background {data-orientation=rows}
+CMV Author Submissions {data-orientation=rows}
 ==============================================================================
 
 Filter {.sidebar}
@@ -349,10 +367,14 @@ Column
 ### Author
 
 ```{r}
+reac_cmv_bauth_link <- reactive({
+  sprintf("https://reddit.com/u/%s/submitted", input$cmv_author)
+})
+
 renderValueBox({
   valueBox(input$cmv_author,
-         caption = "Profile Link",
-         href = sprintf("https://reddit.com/u/%s/submitted", input$cmv_author),
+         caption = "(Author Profile Link)",
+         href = reac_cmv_bauth_link(),
          color = "#0645AD"
   )
 })
@@ -432,7 +454,10 @@ reac_table_past <- reactive({
 renderDataTable(
   datatable(
   reac_cmv_auth_past_activity() %>% select(-date),
-  options = list(DT.fillContainer = T),
+  options = list(DT.fillContainer = T,
+                 autowidth = T, scrollY = 300,
+                 autoheight = T,
+                 pageLength = 30), 
   rownames = FALSE
       )
 )
