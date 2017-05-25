@@ -17,14 +17,16 @@ library(feather)
 library(DT)
 library(ineq)
 library(anytime)
+library(tidytext)
+library(wordclou)
 
 theme_set(theme_minimal())
 
-dat_cmv_auth_subs <- read_feather("cmv_auth_subs_no_content.feather") %>%
+dat_cmv_auth_subs <- read_feather("~/viz-shugamoe/cmv_auth_subs.feather") %>%
   mutate(date = anytime(created_utc))
                            
 
-dat_cmv_subs <- read_feather("cmv_subs.feather") %>%
+dat_cmv_subs <- read_feather("~/viz-shugamoe/cmv_subs.feather") %>%
   mutate(date = anytime(created_utc),  
          tot_deltas = cumsum(OP_gave_delta))
 ```
@@ -64,11 +66,39 @@ sliderInput(
 
 sliderInput(
   "cmv_bin_width",
-  label = "Select Bin Width (Days)",
+  label = "Smoothing (Days)",
   min = 1,
   max = 30,
   value = 7
 )
+
+sliderInput(
+  "cmv_sent_range",
+  label = "Sentiment",
+  min = -1,
+  max = 1,
+  value = c(-1, 1)
+)
+
+sliderInput(
+  "OP_com_range",
+  label = "Original Poster Comments",
+  min = 0,
+  max = 274,
+  value = c(0, 274)
+)
+
+sliderInput("root_comment_range",
+            label = "Direct Replies",
+            min = 0,
+            max = 224,
+            value = c(0, 224))
+
+sliderInput("user_comment_range",
+            label = "Total Comments",
+            min = 0,
+            max = 4903,
+            value = c(0, 4903))
 ```
 
 <!-- ## Select Delta Status -->
@@ -90,7 +120,15 @@ Row
 reac_dat_cmv_sub <- reactive({
   dat_cmv_subs %>%
     filter(date >= input$cmv_time_range[1] &
-             date <= input$cmv_time_range[2]) %>%
+             date <= input$cmv_time_range[2],
+           sentiment >= input$cmv_sent_range[1] & 
+             sentiemnt <= input$cmv_sent_range[2],
+           num_OP_comments >= input$OP_com_range[1] &
+             num_OP_comments <= input$OP_com_range[2],
+           num_root_comments >= input$root_comment_range[1] & 
+             num_root_comments <= input$root_comment_range[2],
+           num_user_comments >= input$user_comment_range[1] & 
+             num_user_comments <= input$user_comment_range[2]) %>%
     mutate(OP_gave_delta = ifelse(OP_gave_delta == TRUE,
                                   "Opinion Changed",
                                   "Opinion Stable"))
@@ -461,4 +499,22 @@ renderDataTable(
   rownames = FALSE
       )
 )
+
+# Modified from day 17 notes
+reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
+
+tst_auth_past <- dat_cmv_auth_subs %>%
+  filter(author == "momerath")
+
+# tokenize
+past_subs <- tst_auth_past %>%
+  filter(!str_detect(content, '^"')) %>%
+  mutate(text = str_replace_all(content, "https://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+  unnest_tokens(word, content, token = "words") %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]"))
+# plot
+past_subs %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
 ```
