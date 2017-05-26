@@ -18,7 +18,7 @@ library(DT)
 library(ineq)
 library(anytime)
 library(tidytext)
-library(wordclou)
+library(wordcloud)
 
 theme_set(theme_minimal())
 
@@ -478,8 +478,33 @@ renderPlotly({
 ```
 
 
-Row
+Row {.tabset}
 ------------------------------------------------------
+
+### Submission Content Wordcloud
+```{r  word_cloud}
+renderPlot({
+  # Modified from day 17 notes
+  reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
+  
+  tst_auth_past <- reac_cmv_auth_past_activity() %>%
+    filter(author == "momerath")
+  
+  # tokenize
+  past_subs <- tst_auth_past %>%
+    filter(!str_detect(content, '^"')) %>%
+    mutate(text = str_replace_all(content, "http[s]?://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+    mutate(text = str_replace_all(text, "http[\\S]*", "")) %>%
+    mutate(text = str_replace_all(text, "www.reddit.com", "")) %>%
+    unnest_tokens(word, text, token = "words") %>%
+    filter(!word %in% stop_words$word,
+           str_detect(word, "[a-z]"))
+  # plot
+  past_subs %>%
+    count(word) %>%
+    with(wordcloud(word, n, max.words = 100))
+})
+```
 
 ###  Past Submissions
 ```{r browse_past_subs}
@@ -500,21 +525,5 @@ renderDataTable(
       )
 )
 
-# Modified from day 17 notes
-reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
-
-tst_auth_past <- dat_cmv_auth_subs %>%
-  filter(author == "momerath")
-
-# tokenize
-past_subs <- tst_auth_past %>%
-  filter(!str_detect(content, '^"')) %>%
-  mutate(text = str_replace_all(content, "https://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
-  unnest_tokens(word, content, token = "words") %>%
-  filter(!word %in% stop_words$word,
-         str_detect(word, "[a-z]"))
-# plot
-past_subs %>%
-  count(word) %>%
-  with(wordcloud(word, n, max.words = 100))
 ```
+
