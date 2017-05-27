@@ -19,6 +19,7 @@ library(ineq)
 library(anytime)
 library(tidytext)
 library(wordcloud)
+library(stringr)
 
 theme_set(theme_minimal())
 
@@ -66,7 +67,7 @@ sliderInput(
 
 sliderInput(
   "cmv_bin_width",
-  label = "Smoothing (Days)",
+  label = "# Days Smoothing",
   min = 1,
   max = 30,
   value = 7
@@ -77,6 +78,7 @@ sliderInput(
   label = "Sentiment",
   min = -1,
   max = 1,
+  step = .1,
   value = c(-1, 1)
 )
 
@@ -115,14 +117,14 @@ sliderInput("user_comment_range",
 Row
 -------------------------------------------------------------------------------
 
-### Frequency of Opinion Malleability
+### Submission Frequency 
 ```{r}
 reac_dat_cmv_sub <- reactive({
-  dat_cmv_subs %>%
+  filtered_subs <- dat_cmv_subs %>%
     filter(date >= input$cmv_time_range[1] &
              date <= input$cmv_time_range[2],
            sentiment >= input$cmv_sent_range[1] & 
-             sentiemnt <= input$cmv_sent_range[2],
+             sentiment <= input$cmv_sent_range[2],
            num_OP_comments >= input$OP_com_range[1] &
              num_OP_comments <= input$OP_com_range[2],
            num_root_comments >= input$root_comment_range[1] & 
@@ -134,29 +136,87 @@ reac_dat_cmv_sub <- reactive({
                                   "Opinion Stable"))
 })
 
+# print(input$cmv_com_types)
+
 renderPlotly({
-  ggplotly(
-  ggplot(reac_dat_cmv_sub(), 
-         aes(date, color = OP_gave_delta)) +
-    geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
-    scale_color_manual(labels = c("No Change", "Change"),
-                       values = c("green", "red")) + 
-    labs(title = "",
-         subtitle = "",
-         x = "Date",
-         y = "Submissions",
-         color = "Opinion changed?"
-         ),
-    tooltip = c("x", "y", "color")
+    time_series <- plotly_build(
+      ggplot(reac_dat_cmv_sub(), 
+           aes(date, color = OP_gave_delta)) +
+      geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
+      scale_color_manual(labels = c("No Change", "Change"),
+                         values = c("green", "red")) + 
+      labs(title = "",
+           subtitle = "",
+           x = "Date",
+           y = "Submissions",
+           color = "Opinion changed?"
+           )
   )
+    
+  raw_change_text <- time_series$x$data[[1]]$text
+  raw_stable_text <- time_series$x$data[[2]]$text
+  
+  
+  change_text_split <- matrix(unlist(str_split(raw_change_text,
+                                                   "<br />", 3)), ncol = 3, byrow = TRUE) 
+  change_text_label <- tibble(count = str_replace(str_extract(change_text_split[, 1], ":(.*)"), ":", ""),
+                              date = strftime(anytime(as.numeric(str_replace(str_extract(change_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
+                              status = str_replace(str_extract(change_text_split[, 3], ":(.*)"), ":", "")) %>%
+    mutate(label = sprintf("Submissions: %s\nDate: %s\nStatus: %s", count, date, status)) %>%
+    select(label)
+  
+  stable_text_split <-  matrix(unlist(str_split(raw_stable_text,
+                                                   "<br />", 3)), ncol = 3, byrow = TRUE)
+  stable_text_label <- tibble(count = str_replace(str_extract(stable_text_split[, 1], ":(.*)"), ":", ""),
+                              date = strftime(anytime(as.numeric(str_replace(str_extract(stable_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
+                              status = str_replace(str_extract(stable_text_split[, 3], ":(.*)"), ":", "")) %>%
+    mutate(label = sprintf("Submissions: %s\nDate: %s\nStatus: %s", count, date, status)) %>%
+    select(label)
+  
+  time_series$x$data[[1]]$text <- change_text_label$label
+  time_series$x$data[[2]]$text <- stable_text_label$label
+  
+  time_series <- time_series %>%
+      layout(title = sprintf("\n%d submissions from %s - %s", 
+                             nrow(reac_dat_cmv_sub()), strftime(input$cmv_time_range[1], format = "%m/%d/%Y"),
+                                  strftime(input$cmv_time_range[2], format = "%m/%d/%Y")))
+  time_series
 })
+
 ```
 
 
-Row 
+Row {.tabset}
 -------------------------------------------------------------------------------
 
-### CMV Submissions
+### CMV Submission Content Wordcloud
+```{r cmv_content_wc}
+renderPlot({
+  # Modified from day 17 notes
+  reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
+  
+  # tokenize
+  filtered_subs <- reac_dat_cmv_sub() %>%
+    select(content) %>%
+    filter(!str_detect(content, '^"')) %>%
+    mutate(text = str_replace_all(content, "http[s]?://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+    mutate(text = str_replace_all(text, "http[\\S]*", "")) %>%
+    mutate(text = str_replace_all(text, "www.reddit.com", "")) %>%
+    mutate(text = str_replace_all(text, "people", "")) %>%
+    mutate(text = str_replace_all(text, "change", "")) %>%
+    mutate(text = str_replace_all(text, "view", "")) %>%
+    unnest_tokens(word, text, token = "words") %>%
+    filter(!word %in% stop_words$word,
+           str_detect(word, "[a-z]"))
+  # plot
+  filtered_subs %>%
+    count(word) %>%
+    with(wordcloud(word, n, max.words = 100))
+                   
+})
+```
+
+### CMV Submissions Table
 ```{r}
 reac_table_cmv_sub <- reactive({
   reac_dat_cmv_sub() %>%
@@ -176,10 +236,11 @@ renderDataTable(
 )
 ```
 
+
 Search CMV Submissions by Title {data-orientation=rows}
 ==============================================================================
 
-Title {.sidebar}
+Search by Title {.sidebar}
 ----------------------------------------------
 ```{r read_model_dat}
 dat_model <- read_feather("dat_model.feather")
@@ -192,7 +253,7 @@ sumry_model_gave_delta <- dat_model %>%
   mutate(prop = count / sum(count))
 ```
 
-### Title
+### Search by Title
 
 ```{r}
 selectInput("cmv_title", "", sort(unique(dat_model$title)),
@@ -207,6 +268,8 @@ reac_cmv_sub_link <- reactive({
   reac_cmv_sub[["href"]]
 })
 ```
+
+
 
 
 Row
@@ -242,7 +305,7 @@ renderValueBox(
                       strftime(reac_cmv_sub()[["date"]], format = "%m/%d   %H:%M %Z"),
                       reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]]), 
     icon = "fa-id-card",
-    color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "green", "red"),
+    color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "red", "green"),
     href = reac_cmv_sub_link()
   )
 )
@@ -293,7 +356,7 @@ reac_gini_color <- reactive({
 
 renderValueBox(
   valueBox(
-    sprintf("% .2f Gini Index", reac_auth_stats()[["gini_index"]]),
+    sprintf("% .2f Submission Diversity (Gini)", reac_auth_stats()[["gini_index"]]),
     color = reac_gini_color()
   )
 )
@@ -310,10 +373,7 @@ reac_cmv_sub_content <- reactive({
 })
 
 renderPrint(reac_cmv_sub_content())
-```
 
-### Prior Submissions
-```{r}
 reac_cmv_auth_past <- reactive({
   dat_cmv_auth_subs %>%
     filter(author == reac_cmv_sub()[["author"]]
@@ -321,7 +381,36 @@ reac_cmv_auth_past <- reactive({
     select(-c(author, href, created_utc)) %>%
     mutate(date_new = paste(month(date), day(date), year(date), sep = "/"))
 })
+```
 
+### Author Submission Content History Wordcloud
+```{r}
+renderPlot({
+  # Modified from day 17 notes
+  reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
+  
+  # tokenize
+  past_subs <- reac_cmv_auth_past() %>%
+    select(content) %>%
+    filter(!str_detect(content, '^"')) %>%
+    mutate(text = str_replace_all(content, "http[s]?://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+    mutate(text = str_replace_all(text, "http[\\S]*", "")) %>%
+    mutate(text = str_replace_all(text, "www.reddit.com", "")) %>%
+    mutate(text = str_replace_all(text, "people", "")) %>%
+    mutate(text = str_replace_all(text, "change", "")) %>%
+    mutate(text = str_replace_all(text, "view", "")) %>%
+    unnest_tokens(word, text, token = "words") %>%
+    filter(!word %in% stop_words$word,
+           str_detect(word, "[a-z]"))
+  # plot
+  past_subs %>%
+    count(word) %>%
+    with(wordcloud(word, n, max.words = 100))
+})
+```
+
+### Prior Submissions Table
+```{r}
 renderDataTable(
   datatable(
   reac_cmv_auth_past() %>% select(-date),
@@ -346,11 +435,11 @@ selectizeInput("cmv_author", "", unique(dat_cmv_subs$author),
 radioButtons("timeline_type", "Timeline Type",
                c("Score" = "score",
                  "Submission Activity" = "sub_activity"),
-               selected = "score")
+               selected = "sub_activity")
 
 sliderInput(
   "past_bin_width",
-  label = "Select Bin Width (Days)",
+  label = "Smoothing (Days)",
   min = 1,
   max = 365,
   value = 30
@@ -440,7 +529,7 @@ reac_cmv_auth_past_activity <- reactive({
     filter(author == input$cmv_author
            ) %>%
     mutate(new_date = paste(year(date), month(date), sep = "/")) %>%
-    select(-c(author, href, created_utc))
+    select(-c(href, created_utc))
 })
 
 reac_cmv_auth_cmvs <- reactive({
@@ -452,28 +541,70 @@ reac_cmv_auth_cmvs <- reactive({
 
 renderPlotly({
   if (input$timeline_type == "score"){
-    plot <- ggplot(reac_cmv_auth_past_activity(), 
+    plot <- (
+      ggplot(reac_cmv_auth_past_activity(), 
                    aes(date, score)) +
       geom_line() + 
       labs(subtitle = "Dashed Red line(s) indicate CMV Submission(s)",
            y = "Score", 
            x = "Date"
            )
+    )
+    for (cmv_sub in reac_cmv_auth_cmvs()){
+      plot <- plot + geom_vline(aes(text = "CMV post"),
+                                xintercept = cmv_sub, linetype = "dashed", color = "#00cc99", size = .3)
+    }
+    time_series <- plotly_build(plot)
+    
+    raw_score_text <- time_series$x$data[[1]]$text
+    
+    score_text_split <- matrix(unlist(str_split(raw_score_text,
+                                                     "<br />", 3)), ncol = 2, byrow = TRUE) 
+    score_text_label <- tibble(date = strftime(anytime(as.numeric(str_replace(str_extract(score_text_split[, 1], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
+                                score = str_replace(str_extract(score_text_split[, 1], ":(.*)"), ":", "")) %>%
+      mutate(label = sprintf("Date: %s\nScore: %s", date, score)) %>%
+      select(label)
+  
+    time_series$x$data[[1]]$text <- score_text_label$label
+  
+    time_series <- time_series %>%
+      layout(title = sprintf("\nSubmission Scores | %d days smoothing", input$past_bin_width))
+    
   } else {
-    plot <- ggplot(reac_cmv_auth_past_activity(), 
+    plot <- ( 
+      ggplot(reac_cmv_auth_past_activity(), 
                    aes(date)) +
       geom_freqpoly(binwidth = 86400 * input$past_bin_width, pad = FALSE) + 
       labs(subtitle = sprintf("Every %d days\nDashed Red line(s) indicate CMV Submission(s)", input$cmv_past_bin_width * 86400),
            x = "Date",
            y = "Submissions",
-           color = "Opinion changed"
+           color = "Opinion changed")
            )
-  }
-  for (cmv_sub in reac_cmv_auth_cmvs()){
-    plot <- plot + geom_vline(aes(text = "CMV post"),
-                              xintercept = cmv_sub, linetype = "dashed", color = "#00cc99", size = .3)
-  }
-  plot
+    for (cmv_sub in reac_cmv_auth_cmvs()){
+      plot <- plot + geom_vline(aes(text = "CMV post"),
+                                xintercept = cmv_sub, linetype = "dashed", color = "#00cc99", size = .3)
+    }
+    
+    time_series <- plotly_build(plot)
+    saveRDS(time_series, "activity_series.rds") 
+    
+    raw_activity_text <- time_series$x$data[[1]]$text
+    
+    activity_text_split <- matrix(unlist(str_split(raw_activity_text,
+                                                     "<br />", 3)), ncol = 2, byrow = TRUE) 
+    activity_text_label <- tibble(count = str_replace(str_extract(activity_text_split[, 1], ":(.*)"), ":", ""),
+                                  date = strftime(
+                                    anytime(as.numeric(str_replace(
+                                      str_extract(activity_text_split[, 1], ":(.*)"), ":", ""))), format = "%m/%d/%Y")) %>%
+      mutate(label = sprintf("Submissions: %s\nDate: %s", count, date)) %>%
+      select(label)
+  
+    time_series$x$data[[1]]$text <- activity_text_label$label
+    
+    time_series <- time_series %>%
+      layout(title = sprintf("\nSubmission Activity | %d days smoothing", input$past_bin_width))
+    }
+  time_series
 })
 ```
 
@@ -488,7 +619,7 @@ renderPlot({
   reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
   
   tst_auth_past <- reac_cmv_auth_past_activity() %>%
-    filter(author == "momerath")
+    filter(author == input$cmv_author)
   
   # tokenize
   past_subs <- tst_auth_past %>%
@@ -503,10 +634,24 @@ renderPlot({
   past_subs %>%
     count(word) %>%
     with(wordcloud(word, n, max.words = 100))
+                   
 })
 ```
 
-###  Past Submissions
+### Past Subreddit Participation Wordcloud
+```{r subreddit_wordcloud}
+renderPlot({
+  tst_auth_past <- reac_cmv_auth_past_activity() %>%
+    filter(author == input$cmv_author)
+  
+  # plot
+  tst_auth_past %>%
+    count(subreddit) %>%
+    with(wordcloud(subreddit, n, max.words = 100))
+})
+```
+
+###  Past Submissions Table
 ```{r browse_past_subs}
 reac_table_past <- reactive({
   reac_cmv_auth_past_activity() %>%
@@ -521,9 +666,8 @@ renderDataTable(
                  autowidth = T, scrollY = 300,
                  autoheight = T,
                  pageLength = 30), 
-  rownames = FALSE
-      )
+  rownames = FALSE)
 )
-
 ```
+
 
