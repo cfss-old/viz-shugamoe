@@ -32,19 +32,55 @@ dat_cmv_subs <- read_feather("~/viz-shugamoe/cmv_subs.feather") %>%
          tot_deltas = cumsum(OP_gave_delta))
 ```
 
-Intro 
+Introduction and Glossary
 ==============================================================================
 
+Column
+--------------------------------------------------------------------------------
+### What is r/changemyview?
+
 r/changemyview is a subreddit where redditors post their opinions as submissions, and
-other redditors respond in an attempt to change their opinion. If the original poster
+other redditors respond in an attempt to change their opinion. If the original poster (OP)
 changes their opinion, then can award the comment that changed their opinion with a 
-"delta" that is added to the comment author's lifetime "deltas" received in the subreddit.
+"delta" that is added to the comment author's lifetime "deltas" received in the subreddit, if no
+deltas are awarded, it's assumed that the opinion of the OP's opinion did not change. 
 
 All of the submissions (opinions) posted in 2016 have been gathered, as well as the
 entire submission history of the authors who posted their submissions. Ahead you can
 observe the frequency of opinions where the OP gave at least one delta, or no delta,
 the individual submissions with statistics from the author's history presented, as well
 as trends of individual authors' submission scores and submission frequency.
+
+Column
+--------------------------------------------------------------------------------
+### Key Terms
+
+#### Sentiment
+The sentiment of the content (view/opinion) of a r/changemyview submission as 
+measured by VADER (Valence Aware Dictionary and sEntiment Reasoner) using Python's
+NLTK Library. `-1` (red) indicates full negative sentiment, `0` (white) full neutural,
+and `1` (green) full positive sentiment.
+
+#### Total Comments: 
+All of the comments made in the changemyview submission.
+
+#### Direct Replies:
+Comments made directly responding to the content of the submission.
+
+#### Author Replies:
+Responses from the author of the submission to any comment made in the submission.
+
+#### Prior Submissions:
+The number of submissions the author made before the current submission.
+
+### Score
+The net of (thumbs) up votes and down votes a submission has received.
+
+### Subreddit Inequality:
+A measure of how unequal the concentration of subreddits are for the prior
+submissions. `100%` (black) indicates every submissions was in the same subreddit, while `0%` (white)
+indicates that every submission was in a different subreddit. This is simply the
+Gini Index in percentage form.
 
 r/changemyview Submissions Delta Trend {data-orientation=rows}
 ==============================================================================
@@ -82,13 +118,11 @@ sliderInput(
   value = c(-1, 1)
 )
 
-sliderInput(
-  "OP_com_range",
-  label = "Original Poster Comments",
-  min = 0,
-  max = 274,
-  value = c(0, 274)
-)
+sliderInput("user_comment_range",
+            label = "Total Comments",
+            min = 0,
+            max = 4903,
+            value = c(0, 4903))
 
 sliderInput("root_comment_range",
             label = "Direct Replies",
@@ -96,23 +130,14 @@ sliderInput("root_comment_range",
             max = 224,
             value = c(0, 224))
 
-sliderInput("user_comment_range",
-            label = "Total Comments",
-            min = 0,
-            max = 4903,
-            value = c(0, 4903))
+sliderInput(
+  "OP_com_range",
+  label = "Original Poster (OP) Comments",
+  min = 0,
+  max = 274,
+  value = c(0, 274)
+)
 ```
-
-<!-- ## Select Delta Status -->
-<!-- ```{r} -->
-<!-- delta_status = c("Delta Given", "No Delta Given", "Either") -->
-
-<!-- selectInput( -->
-<!--   "delta_status", -->
-<!--   "Delta Status", -->
-<!--   choices = delta_status -->
-<!-- ) -->
-<!-- ``` -->
 
 Row
 -------------------------------------------------------------------------------
@@ -136,8 +161,6 @@ reac_dat_cmv_sub <- reactive({
                                   "Opinion Stable"))
 })
 
-# print(input$cmv_com_types)
-
 renderPlotly({
     time_series <- plotly_build(
       ggplot(reac_dat_cmv_sub(), 
@@ -145,10 +168,11 @@ renderPlotly({
       geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
       scale_color_manual(labels = c("No Change", "Change"),
                          values = c("green", "red")) + 
+      # scale_y_continuous(labels = scales::percent) +
       labs(title = "",
            subtitle = "",
            x = "Date",
-           y = "Submissions",
+           y = "# Submissions",
            color = "Opinion changed?"
            )
   )
@@ -159,18 +183,25 @@ renderPlotly({
   
   change_text_split <- matrix(unlist(str_split(raw_change_text,
                                                    "<br />", 3)), ncol = 3, byrow = TRUE) 
-  change_text_label <- tibble(count = str_replace(str_extract(change_text_split[, 1], ":(.*)"), ":", ""),
-                              date = strftime(anytime(as.numeric(str_replace(str_extract(change_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
-                              status = str_replace(str_extract(change_text_split[, 3], ":(.*)"), ":", "")) %>%
-    mutate(label = sprintf("Submissions: %s\nDate: %s\nStatus: %s", count, date, status)) %>%
+  
+  total_submissions <- time_series$x$data[[1]]$y + time_series$x$data[[2]]$y
+  
+  change_text_label <- tibble(count = as.numeric(str_replace(str_extract(change_text_split[, 1], ":(.*)"), ":", "")),
+                              date = strftime(anytime(as.numeric(str_replace(str_extract(change_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d"),
+                              date_beg = strftime(anytime(as.numeric(str_replace(str_extract(change_text_split[, 2], ":(.*)"), ":", "")) - 86400 * input$cmv_bin_width), format = "%m/%d"),
+                              status = str_replace(str_extract(change_text_split[, 3], ":(.*)"), ":", ""),
+                              percent = 100 * count / total_submissions) %>%
+    mutate(label = sprintf("Submissions: %s (%.1f of Total%%)\n%s - %s",  count, percent, date_beg, date)) %>%
     select(label)
   
   stable_text_split <-  matrix(unlist(str_split(raw_stable_text,
                                                    "<br />", 3)), ncol = 3, byrow = TRUE)
-  stable_text_label <- tibble(count = str_replace(str_extract(stable_text_split[, 1], ":(.*)"), ":", ""),
-                              date = strftime(anytime(as.numeric(str_replace(str_extract(stable_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
-                              status = str_replace(str_extract(stable_text_split[, 3], ":(.*)"), ":", "")) %>%
-    mutate(label = sprintf("Submissions: %s\nDate: %s\nStatus: %s", count, date, status)) %>%
+  stable_text_label <- tibble(count = as.numeric(str_replace(str_extract(stable_text_split[, 1], ":(.*)"), ":", "")),
+                              date = strftime(anytime(as.numeric(str_replace(str_extract(stable_text_split[, 2], ":(.*)"), ":", ""))), format = "%m/%d"),
+                              date_beg = strftime(anytime(as.numeric(str_replace(str_extract(stable_text_split[, 2], ":(.*)"), ":", "")) - 86400 * input$cmv_bin_width), format = "%m/%d"),
+                              status = str_replace(str_extract(stable_text_split[, 3], ":(.*)"), ":", ""),
+                              percent = 100 * count / total_submissions) %>%
+    mutate(label = sprintf("Submissions: %s (%.1f of Total%%)\n%s - %s",  count, percent, date_beg, date)) %>%
     select(label)
   
   time_series$x$data[[1]]$text <- change_text_label$label
@@ -180,6 +211,7 @@ renderPlotly({
       layout(title = sprintf("\n%d submissions from %s - %s", 
                              nrow(reac_dat_cmv_sub()), strftime(input$cmv_time_range[1], format = "%m/%d/%Y"),
                                   strftime(input$cmv_time_range[2], format = "%m/%d/%Y")))
+  saveRDS(time_series$x$data, "testing.rds")
   time_series
 })
 
@@ -241,7 +273,8 @@ Search CMV Submissions by Title {data-orientation=rows}
 ==============================================================================
 
 Search by Title {.sidebar}
-----------------------------------------------
+--------------------------------------------------------
+
 ```{r read_model_dat}
 dat_model <- read_feather("dat_model.feather")
 indep_vars <- dat_model %>%
@@ -252,6 +285,18 @@ sumry_model_gave_delta <- dat_model %>%
   summarise(count = n()) %>%
   mutate(prop = count / sum(count))
 ```
+
+Search by specific keyword(s) to get an in-depth look at the properties of a specific r/changemyview post and its
+author.
+
+###
+
+View wordclouds showing the author's most frequently used words in their prior submissions and the subreddits
+they most frequently posted in.
+
+###
+
+Search the titles, submission dates, and subreddits of the author's prior submissions.
 
 ### Search by Title
 
@@ -270,8 +315,6 @@ reac_cmv_sub_link <- reactive({
 ```
 
 
-
-
 Row
 --------------------------------------------
 
@@ -284,9 +327,30 @@ reac_cmv_auth_link <- reactive({
 
 renderValueBox({
   valueBox(reac_cmv_sub()[["author"]],
-         caption = " (Author Profile Link)",
+         caption = "Author",
          href = reac_cmv_auth_link(),
          color = "#0645AD"
+  )
+})
+```
+
+
+### Sentiment
+```{r rend_senti}
+senti_col_ramp <- colorRamp(c("red", "white", "darkgreen"))
+senti_colors <- function(num){
+  colors <- senti_col_ramp(num)
+  rgb(colors[1], colors[2], colors[3], maxColorValue = 255)
+}
+
+reac_senti_color <- reactive({
+  senti_colors(reac_cmv_sub()[["sentiment"]])
+})
+
+renderValueBox({
+  valueBox(round(reac_cmv_sub()[["sentiment"]], 1),
+         caption = "Sentiment",
+         color = reac_senti_color()
   )
 })
 ```
@@ -301,9 +365,10 @@ renderValueBox(
   valueBox(
     ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "Opinion Changed",
            "No Opinion Change"),
-    caption = sprintf("Posted: %s | %d user comments | %d direct replies\n (Submission Link)", 
+    caption = sprintf("Posted: %s | %d User Comments | %d Direct Replies\n | %d Author Comments", 
                       strftime(reac_cmv_sub()[["date"]], format = "%m/%d   %H:%M %Z"),
-                      reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]]), 
+                      reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]],
+                      reac_cmv_sub()[["num_OP_comments"]]), 
     icon = "fa-id-card",
     color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "red", "green"),
     href = reac_cmv_sub_link()
@@ -342,9 +407,9 @@ renderValueBox(
 )
 ```
 
-### Submission Diversity
+### Submission Inequality
 ```{r}
-col_ramp <- colorRamp(c("red", "orange", "green"))
+col_ramp <- colorRamp(c("black", "white"))
 gini_colors <- function(num){
   colors <- col_ramp(num)
   rgb(colors[1], colors[2], colors[3], maxColorValue = 255)
@@ -356,7 +421,7 @@ reac_gini_color <- reactive({
 
 renderValueBox(
   valueBox(
-    sprintf("% .2f Submission Diversity (Gini)", reac_auth_stats()[["gini_index"]]),
+    sprintf("% .1f%%", 100 * reac_auth_stats()[["gini_index"]]),
     color = reac_gini_color()
   )
 )
@@ -409,6 +474,16 @@ renderPlot({
 })
 ```
 
+### Author Subreddit Participation History Wordcloud
+```{r}
+renderPlot({
+  # plot
+  reac_cmv_auth_past() %>%
+    count(subreddit) %>%
+    with(wordcloud(subreddit, n, max.words = 50))
+})
+```
+
 ### Prior Submissions Table
 ```{r}
 renderDataTable(
@@ -449,7 +524,12 @@ sliderInput(
 
 ```
 
+###
 
+View a timeline of the selected author's submission frequency with day smoothing.
+
+### 
+View a timeline of the author's submission scores.
 
 ```{r make_model_dat, eval=FALSE}
 model_indep_vars <- function(submission, dat_cmv_auth_subs){
@@ -638,7 +718,7 @@ renderPlot({
 })
 ```
 
-### Past Subreddit Participation Wordcloud
+### Subreddit Participation Wordcloud
 ```{r subreddit_wordcloud}
 renderPlot({
   tst_auth_past <- reac_cmv_auth_past_activity() %>%
