@@ -1,9 +1,13 @@
 ---
 title: "2016 r/changemyview Submissions and their Authors"
+resource_files:
+- cmv_auth_subs.feather
+- cmv_subs.feather
+- dat_model.feather
+runtime: shiny
 output:
   flexdashboard::flex_dashboard:
     vertical_layout: scroll
-runtime: shiny
 ---
 ```{r init, include = FALSE, verbose=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
 knitr::opts_chunk$set(verbose=FALSE, echo=FALSE, warning=FALSE, message=FALSE)
@@ -23,11 +27,11 @@ library(stringr)
 
 theme_set(theme_minimal())
 
-dat_cmv_auth_subs <- read_feather("~/viz-shugamoe/cmv_auth_subs.feather") %>%
+# Read in the main data files
+dat_cmv_auth_subs <- read_feather("cmv_auth_subs.feather") %>%
   mutate(date = anytime(created_utc))
                            
-
-dat_cmv_subs <- read_feather("~/viz-shugamoe/cmv_subs.feather") %>%
+dat_cmv_subs <- read_feather("cmv_subs.feather") %>%
   mutate(date = anytime(created_utc),  
          tot_deltas = cumsum(OP_gave_delta))
 ```
@@ -37,9 +41,10 @@ Introduction and Glossary
 
 Column
 --------------------------------------------------------------------------------
+
 ### What is r/changemyview?
 
-r/changemyview is a subreddit where redditors post their opinions as submissions, and
+[r/changemyview](https://reddit.com/r/changemyview) is a subreddit where redditors post their opinions as submissions, and
 other redditors respond in an attempt to change their opinion. If the original poster (OP)
 changes their opinion, then can award the comment that changed their opinion with a 
 "delta" that is added to the comment author's lifetime "deltas" received in the subreddit, if no
@@ -73,10 +78,10 @@ Responses from the author of the submission to any comment made in the submissio
 #### Prior Submissions:
 The number of submissions the author made before the current submission.
 
-### Score
+#### Score
 The net of (thumbs) up votes and down votes a submission has received.
 
-### Subreddit Inequality:
+#### Subreddit Inequality:
 A measure of how unequal the concentration of subreddits are for the prior
 submissions. `100%` (black) indicates every submissions was in the same subreddit, while `0%` (white)
 indicates that every submission was in a different subreddit. This is simply the
@@ -88,9 +93,12 @@ r/changemyview Submissions Delta Trend {data-orientation=rows}
 Filter r/changemyview submissions {.sidebar}
 -------------------------------------------------------------------------------
 ```{r filter_date}
+# Posts are only for 2016
 start_date <- mdy("1/1/16")
 end_date <- mdy("12/31/16")
 
+
+# Slider Inputs for filtering submissions
 sliderInput(
   "cmv_time_range",
   label = "Select Time Span",
@@ -101,6 +109,7 @@ sliderInput(
   timeFormat = "%m/%d"
 )
 
+# Binwidth for geom_freqpoly
 sliderInput(
   "cmv_bin_width",
   label = "# Days Smoothing",
@@ -109,6 +118,7 @@ sliderInput(
   value = 7
 )
 
+# Select the range of lowest setniment to highest sentiment to view.
 sliderInput(
   "cmv_sent_range",
   label = "Sentiment",
@@ -118,18 +128,21 @@ sliderInput(
   value = c(-1, 1)
 )
 
+# How many total comments are in a submission.
 sliderInput("user_comment_range",
             label = "Total Comments",
             min = 0,
             max = 4903,
             value = c(0, 4903))
 
+# How many direct comments are in a submission.
 sliderInput("root_comment_range",
             label = "Direct Replies",
             min = 0,
             max = 224,
             value = c(0, 224))
 
+# How many times the OP commented in their own submission.
 sliderInput(
   "OP_com_range",
   label = "Original Poster (OP) Comments",
@@ -144,6 +157,7 @@ Row
 
 ### Submission Frequency 
 ```{r}
+# Dataset filtered from the sliders above.
 reac_dat_cmv_sub <- reactive({
   filtered_subs <- dat_cmv_subs %>%
     filter(date >= input$cmv_time_range[1] &
@@ -161,10 +175,15 @@ reac_dat_cmv_sub <- reactive({
                                   "Opinion Stable"))
 })
 
+# This plots the filtered data as a timeline with two lines:
+# - The Frequency over the bin width of stable and changed opinions
 renderPlotly({
     time_series <- plotly_build(
+      
+      # GGplot object
       ggplot(reac_dat_cmv_sub(), 
            aes(date, color = OP_gave_delta)) +
+                            # A day is 86400 in UTC epoch
       geom_freqpoly(binwidth = 86400 * input$cmv_bin_width, pad = FALSE) + 
       scale_color_manual(labels = c("No Change", "Change"),
                          values = c("green", "red")) + 
@@ -176,11 +195,10 @@ renderPlotly({
            color = "Opinion changed?"
            )
   )
-    
+  
+  # Hackish way to make the tooltips better looking and include % that each category consists of the total
   raw_change_text <- time_series$x$data[[1]]$text
   raw_stable_text <- time_series$x$data[[2]]$text
-  
-  
   change_text_split <- matrix(unlist(str_split(raw_change_text,
                                                    "<br />", 3)), ncol = 3, byrow = TRUE) 
   
@@ -211,7 +229,6 @@ renderPlotly({
       layout(title = sprintf("\n%d submissions from %s - %s", 
                              nrow(reac_dat_cmv_sub()), strftime(input$cmv_time_range[1], format = "%m/%d/%Y"),
                                   strftime(input$cmv_time_range[2], format = "%m/%d/%Y")))
-  saveRDS(time_series$x$data, "testing.rds")
   time_series
 })
 
@@ -223,6 +240,7 @@ Row {.tabset}
 
 ### CMV Submission Content Wordcloud
 ```{r cmv_content_wc}
+# Plot the wordcloud of the content of the filtered CMV data.
 renderPlot({
   # Modified from day 17 notes
   reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
@@ -250,12 +268,15 @@ renderPlot({
 
 ### CMV Submissions Table
 ```{r}
+# Custom filtered data that doesn't include certain columns
+# This is so the table will look better.
 reac_table_cmv_sub <- reactive({
   reac_dat_cmv_sub() %>%
     select(OP_gave_delta, title, date) %>%
     mutate(date = paste(year(date), month(date), sep = "/"))
 })
 
+# Render the data table
 renderDataTable(
   datatable(
   reac_table_cmv_sub(),
@@ -276,10 +297,12 @@ Search by Title {.sidebar}
 --------------------------------------------------------
 
 ```{r read_model_dat}
+# Read in another dataset.
 dat_model <- read_feather("dat_model.feather")
 indep_vars <- dat_model %>%
   select(-OP_gave_delta)
 
+# For debugging purposes.
 sumry_model_gave_delta <- dat_model %>% 
   group_by(OP_gave_delta) %>%
   summarise(count = n()) %>%
@@ -301,16 +324,14 @@ Search the titles, submission dates, and subreddits of the author's prior submis
 ### Search by Title
 
 ```{r}
+# Title selection
 selectInput("cmv_title", "", sort(unique(dat_model$title)),
                 selected = "CMV: Trump supports the Jewish people")
 
+# Retrieve the specific title
 reac_cmv_sub <- reactive({
  dat_cmv_subs %>%
     filter(title == input$cmv_title)
-})
-
-reac_cmv_sub_link <- reactive({
-  reac_cmv_sub[["href"]]
 })
 ```
 
@@ -320,15 +341,10 @@ Row
 
 ### Author
 ```{r}
-reac_cmv_auth_link <- reactive({
-  sprintf("https://reddit.com/u/%s/submitted", reac_cmv_sub()[["author"]])
-})
-
-
+# Show the name of the author prominently.
 renderValueBox({
   valueBox(reac_cmv_sub()[["author"]],
          caption = "Author",
-         href = reac_cmv_auth_link(),
          color = "#0645AD"
   )
 })
@@ -337,16 +353,19 @@ renderValueBox({
 
 ### Sentiment
 ```{r rend_senti}
+# Customize the color depending on the sentiment value.
 senti_col_ramp <- colorRamp(c("red", "white", "darkgreen"))
 senti_colors <- function(num){
   colors <- senti_col_ramp(num)
   rgb(colors[1], colors[2], colors[3], maxColorValue = 255)
 }
 
+# Reactive CMV color based on current sentiment of selected title.
 reac_senti_color <- reactive({
   senti_colors(reac_cmv_sub()[["sentiment"]])
 })
 
+# Display the sentiment value with the appropriate color.
 renderValueBox({
   valueBox(round(reac_cmv_sub()[["sentiment"]], 1),
          caption = "Sentiment",
@@ -357,10 +376,9 @@ renderValueBox({
 
 ### OP gave delta
 ```{r}
-reac_cmv_sub_link <- reactive({
-  reac_cmv_sub()[["href"]]
-})
-
+# Display whether or not the OP changed their opinion, red for no, green for yes.
+# Also display statistics for how many comments are in the submission, how many direct comments
+# there are, and how many OP replies.
 renderValueBox(
   valueBox(
     ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "Opinion Changed",
@@ -370,8 +388,7 @@ renderValueBox(
                       reac_cmv_sub()[["num_user_comments"]], reac_cmv_sub()[["num_root_comments"]],
                       reac_cmv_sub()[["num_OP_comments"]]), 
     icon = "fa-id-card",
-    color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "red", "green"),
-    href = reac_cmv_sub_link()
+    color = ifelse(reac_cmv_sub()[["OP_gave_delta"]] == TRUE, "red", "green")
   )
 )
 ```
@@ -381,6 +398,7 @@ Row
 
 ### 
 ```{r}
+# Retrieve the stats for the author of the currently selected title.
 reac_auth_stats <- reactive({
   dat_model %>%
     filter(author == reac_cmv_sub()[["author"]], 
@@ -388,6 +406,8 @@ reac_auth_stats <- reactive({
 })
 
 
+# Display how many submissions the author wrote prior to this changemyview 
+# submission.
 renderValueBox(
   valueBox(
     sprintf("%d", reac_auth_stats()[["num_prior_subs"]]),
@@ -398,6 +418,7 @@ renderValueBox(
 
 ### 
 ```{r}
+# Display the average and total submission score of those previous submissions.
 renderValueBox(
   valueBox(
     sprintf("%.2f (%.0f)", reac_auth_stats()[["avg_sub_score"]],
@@ -409,16 +430,19 @@ renderValueBox(
 
 ### Submission Inequality
 ```{r}
+# Custom color ramp for the gini index
 col_ramp <- colorRamp(c("black", "white"))
 gini_colors <- function(num){
   colors <- col_ramp(num)
   rgb(colors[1], colors[2], colors[3], maxColorValue = 255)
 }
 
+# The color for the current gini index
 reac_gini_color <- reactive({
   gini_colors(reac_auth_stats()[["gini_index"]])
 })
 
+# Display the gini index as an "inequality" percentage and the appropriate color.
 renderValueBox(
   valueBox(
     sprintf("% .1f%%", 100 * reac_auth_stats()[["gini_index"]]),
@@ -432,13 +456,19 @@ Row {.tabset}
 
 ### Submission Content
 
-```{r, results="asis"}
+```{r}
+# The content of the submission selected.
 reac_cmv_sub_content <- reactive({
   writeLines(reac_cmv_sub()[["content"]])
 })
 
+# Display said content
 renderPrint(reac_cmv_sub_content())
+```
 
+### Author Submission Content History Wordcloud
+```{r}
+# Select only the past history of the author in question.
 reac_cmv_auth_past <- reactive({
   dat_cmv_auth_subs %>%
     filter(author == reac_cmv_sub()[["author"]]
@@ -446,10 +476,8 @@ reac_cmv_auth_past <- reactive({
     select(-c(author, href, created_utc)) %>%
     mutate(date_new = paste(month(date), day(date), year(date), sep = "/"))
 })
-```
 
-### Author Submission Content History Wordcloud
-```{r}
+# Display a wordcloud of the content of the author's submission history.
 renderPlot({
   # Modified from day 17 notes
   reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
@@ -463,7 +491,7 @@ renderPlot({
     mutate(text = str_replace_all(text, "www.reddit.com", "")) %>%
     mutate(text = str_replace_all(text, "people", "")) %>%
     mutate(text = str_replace_all(text, "change", "")) %>%
-    mutate(text = str_replace_all(text, "view", "")) %>%
+    mutate(text = str_replace_all(text, "view", "")) %>% # Removing some commonly used words.
     unnest_tokens(word, text, token = "words") %>%
     filter(!word %in% stop_words$word,
            str_detect(word, "[a-z]"))
@@ -476,6 +504,7 @@ renderPlot({
 
 ### Author Subreddit Participation History Wordcloud
 ```{r}
+# Simple wordcloud showing what subreddits the given author participated in most.
 renderPlot({
   # plot
   reac_cmv_auth_past() %>%
@@ -486,6 +515,7 @@ renderPlot({
 
 ### Prior Submissions Table
 ```{r}
+# Show a data table of the author's past submissions. Can also search it.
 renderDataTable(
   datatable(
   reac_cmv_auth_past() %>% select(-date),
@@ -504,17 +534,21 @@ CMV Author Submissions {data-orientation=rows}
 Filter {.sidebar}
 ----------------------------------------------
 ```{r}
-selectizeInput("cmv_author", "", unique(dat_cmv_subs$author),
+# Select a particular author.
+selectizeInput("cmv_author", "", sort(unique(dat_cmv_subs$author)),
                 selected = "oldie101")
 
+# Select timeline type, a freqpoly of their submission activity or a timeline of
+# their scores
 radioButtons("timeline_type", "Timeline Type",
                c("Score" = "score",
                  "Submission Activity" = "sub_activity"),
                selected = "sub_activity")
 
+# Select day smoothing parameter for the freqpoly
 sliderInput(
   "past_bin_width",
-  label = "Smoothing (Days)",
+  label = "Smoothing (Days - Submission Activity only)",
   min = 1,
   max = 365,
   value = 30
@@ -531,42 +565,6 @@ View a timeline of the selected author's submission frequency with day smoothing
 ### 
 View a timeline of the author's submission scores.
 
-```{r make_model_dat, eval=FALSE}
-model_indep_vars <- function(submission, dat_cmv_auth_subs){
-  force(dat_cmv_auth_subs)
-  prior_subs <- dat_cmv_auth_subs %>%
-    filter(author == submission$author,
-           created_utc < submission$created_utc)
-  
-  if (nrow(prior_subs) == 0){
-    has_priors <- FALSE
-  } else{
-    has_priors <- TRUE
-  }
-  
-  subreddit_dist <- prior_subs %>%
-    group_by(subreddit) %>%
-    summarise(n = n())
-  
-  # browser()
-  
-  (sub_info <- c(nrow(prior_subs),
-                mean(prior_subs$score),
-                ineq(subreddit_dist$n, type = "Gini"),
-                has_priors))
-}
-
-dat_model <- dat_cmv_subs %>%
-  by_row(model_indep_vars, dat_cmv_auth_subs = dat_cmv_auth_subs, 
-         .collate = "cols", .to = "indep_var") %>%
-  rename(num_prior_subs = indep_var1,
-         avg_sub_score = indep_var2,
-         gini_index = indep_var3,
-         has_priors = indep_var4) %>%
-  filter(has_priors == TRUE)
-
-write_feather(dat_model, "dat_model.feather")
-```
 
 Column
 ------------------------------------------------------
@@ -574,14 +572,11 @@ Column
 ### Author
 
 ```{r}
-reac_cmv_bauth_link <- reactive({
-  sprintf("https://reddit.com/u/%s/submitted", input$cmv_author)
-})
-
+# Display the name of the author prominently again.
 renderValueBox({
   valueBox(input$cmv_author,
-         caption = "(Author Profile Link)",
-         href = reac_cmv_bauth_link(),
+         caption = "Author",
+         # href = reac_cmv_bauth_link(),
          color = "#0645AD"
   )
 })
@@ -590,6 +585,9 @@ renderValueBox({
 ### CMV Submissions
 
 ```{r}
+# Show how many changemyview submissions the author has written, with 
+# a color matching the vertical lines in the timeline that indicate when they
+# occurred.
 renderValueBox({
   valueBox(length(reac_cmv_auth_cmvs()),
          caption = "Changemyview Submissions",
@@ -604,6 +602,7 @@ Row
 ###
 
 ```{r}
+# Retrieve the past activity for the given author.
 reac_cmv_auth_past_activity <- reactive({
   dat_cmv_auth_subs %>%
     filter(author == input$cmv_author
@@ -612,6 +611,7 @@ reac_cmv_auth_past_activity <- reactive({
     select(-c(href, created_utc))
 })
 
+# Retrieve only the CMV submissions of the author
 reac_cmv_auth_cmvs <- reactive({
   cmv_only <- reac_cmv_auth_past_activity() %>%
     filter(subreddit == "r/changemyview") %>%
@@ -619,6 +619,7 @@ reac_cmv_auth_cmvs <- reactive({
   as.vector(cmv_only$date)
 })
 
+# Render the timeline desired
 renderPlotly({
   if (input$timeline_type == "score"){
     plot <- (
@@ -630,14 +631,14 @@ renderPlotly({
            x = "Date"
            )
     )
+    # Add in lines to indicate when their CMV submisisons took place
     for (cmv_sub in reac_cmv_auth_cmvs()){
       plot <- plot + geom_vline(aes(text = "CMV post"),
                                 xintercept = cmv_sub, linetype = "dashed", color = "#00cc99", size = .3)
     }
+    # A hackish way to make the tooltip better.
     time_series <- plotly_build(plot)
-    
     raw_score_text <- time_series$x$data[[1]]$text
-    
     score_text_split <- matrix(unlist(str_split(raw_score_text,
                                                      "<br />", 3)), ncol = 2, byrow = TRUE) 
     score_text_label <- tibble(date = strftime(anytime(as.numeric(str_replace(str_extract(score_text_split[, 1], ":(.*)"), ":", ""))), format = "%m/%d/%Y"),
@@ -651,6 +652,7 @@ renderPlotly({
       layout(title = sprintf("\nSubmission Scores | %d days smoothing", input$past_bin_width))
     
   } else {
+    # Analagous things down here, with a different timeline type.
     plot <- ( 
       ggplot(reac_cmv_auth_past_activity(), 
                    aes(date)) +
@@ -666,10 +668,8 @@ renderPlotly({
     }
     
     time_series <- plotly_build(plot)
-    saveRDS(time_series, "activity_series.rds") 
     
     raw_activity_text <- time_series$x$data[[1]]$text
-    
     activity_text_split <- matrix(unlist(str_split(raw_activity_text,
                                                      "<br />", 3)), ncol = 2, byrow = TRUE) 
     activity_text_label <- tibble(count = str_replace(str_extract(activity_text_split[, 1], ":(.*)"), ":", ""),
@@ -694,6 +694,7 @@ Row {.tabset}
 
 ### Submission Content Wordcloud
 ```{r  word_cloud}
+# Render a wordcloud of the content of their past submissions.
 renderPlot({
   # Modified from day 17 notes
   reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"   # custom regular expression to tokenize tweets
@@ -720,6 +721,7 @@ renderPlot({
 
 ### Subreddit Participation Wordcloud
 ```{r subreddit_wordcloud}
+# Render a wordcloud representing that author's most popular subreddits.
 renderPlot({
   tst_auth_past <- reac_cmv_auth_past_activity() %>%
     filter(author == input$cmv_author)
@@ -733,6 +735,7 @@ renderPlot({
 
 ###  Past Submissions Table
 ```{r browse_past_subs}
+# Render a table of that author's past submissions.
 reac_table_past <- reactive({
   reac_cmv_auth_past_activity() %>%
     select(title, score, subreddit, date) %>%
@@ -749,5 +752,3 @@ renderDataTable(
   rownames = FALSE)
 )
 ```
-
-
